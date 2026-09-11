@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waking {{ host.name }} - SparkPlug</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #38bdf8;
+            --primary-glow: rgba(56, 189, 248, 0.35);
+            --accent: #22c55e;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: var(--font);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2.5rem 2rem;
+            max-width: 480px;
+            width: 100%;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+            text-align: center;
+        }
+
+        .icon-container {
+            position: relative;
+            width: 88px;
+            height: 88px;
+            margin: 0 auto 1.5rem auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .spinner-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: var(--primary);
+            border-right-color: var(--primary);
+            animation: spin 1.2s cubic-bezier(0.55, 0.25, 0.25, 0.7) infinite;
+        }
+
+        .pulse-circle {
+            position: absolute;
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: var(--primary-glow);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .icon-svg {
+            position: relative;
+            z-index: 2;
+            width: 38px;
+            height: 38px;
+            fill: none;
+            stroke: var(--primary);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.025em;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            color: var(--primary);
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-bottom: 1.5rem;
+        }
+
+        .badge.online {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.2);
+            color: var(--accent);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+            animation: blink 1.2s infinite ease-in-out;
+        }
+
+        .meta-info {
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 10px;
+            padding: 0.85rem 1rem;
+            margin-bottom: 1.5rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .meta-row span:last-child {
+            color: var(--text-main);
+            font-family: monospace;
+        }
+
+        .btn-redirect {
+            display: inline-block;
+            width: 100%;
+            padding: 0.75rem 1.25rem;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-redirect:hover {
+            background: #1d4ed8;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(0.9); opacity: 0.4; }
+            50% { transform: scale(1.15); opacity: 0.8; }
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon-container">
+            <div class="pulse-circle"></div>
+            <div class="spinner-ring" id="spinner"></div>
+            <svg class="icon-svg" id="icon" viewBox="0 0 24 24">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                <line x1="12" y1="2" x2="12" y2="12"></line>
+            </svg>
+        </div>
+
+        <h1 id="title">Waking Host...</h1>
+        <p class="subtitle" id="subtitle">SparkPlug broadcasted a Wake-on-LAN packet to {{ host.name }}.</p>
+
+        <div class="badge" id="status-badge">
+            <div class="status-dot"></div>
+            <span id="status-text">{{ current_state | upper }}</span>
+        </div>
+
+        <div class="meta-info">
+            <div class="meta-row">
+                <span>Host ID:</span>
+                <span>{{ host.id }}</span>
+            </div>
+            <div class="meta-row">
+                <span>Target IP:</span>
+                <span>{{ host.ip_address }}:{{ host.check_port }}</span>
+            </div>
+            <div class="meta-row">
+                <span>MAC Address:</span>
+                <span>{{ host.mac_address }}</span>
+            </div>
+        </div>
+
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;" id="timer-text">
+            Checking host reachability...
+        </p>
+        <a id="redirect-btn" class="btn-redirect" style="display: none;" href="{{ redirect_url }}">
+            Continue to Application &rarr;
+        </a>
+    </div>
+
+    <script>
+        const hostId = "{{ host.id }}";
+        const redirectUrl = "{{ redirect_url }}";
+        let attempts = 0;
+
+        async function pollStatus() {
+            attempts++;
+            document.getElementById("timer-text").innerText = `Checking host reachability (${attempts}s)...`;
+            try {
+                const res = await fetch(`/status/${hostId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const state = data.state;
+                    const badge = document.getElementById("status-badge");
+                    const statusText = document.getElementById("status-text");
+
+                    if (state === "online" || state === "booting") {
+                        statusText.innerText = "ONLINE";
+                        badge.classList.add("online");
+                        document.getElementById("title").innerText = "Host is Online!";
+                        document.getElementById("subtitle").innerText = "Connection verified. Redirecting...";
+                        document.getElementById("spinner").style.display = "none";
+                        document.getElementById("redirect-btn").style.display = "inline-block";
+
+                        setTimeout(() => {
+                            window.location.href = redirectUrl;
+                        }, 1000);
+                        return;
+                    } else if (state === "waking") {
+                        statusText.innerText = "WAKING UP";
+                    } else if (state === "sleeping") {
+                        statusText.innerText = "RESUMING FROM SLEEP";
+                    } else {
+                        statusText.innerText = state.toUpperCase();
+                    }
+                }
+            } catch (err) {
+                console.error("Polling error:", err);
+            }
+
+            setTimeout(pollStatus, 1000);
+        }
+
+        setTimeout(pollStatus, 1000);
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,40 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: sparkplug-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # Expose SparkPlug internal web UI if accessing directly, or keep internal through Caddy
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      # Shared Unix domain socket directory for real-time log streaming to SparkPlug
+      - caddy_socket:/var/run/caddy
+
+  sparkplug:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sparkplug-daemon
+    restart: unless-stopped
+    # Run in the exact same network namespace as Caddy
+    network_mode: "service:caddy"
+    depends_on:
+      - caddy
+    volumes:
+      - ./config.example.yaml:/etc/sparkplug/config.yaml:ro
+      - ./keys:/etc/sparkplug/keys:ro
+      # Shared Unix domain socket directory with Caddy
+      - caddy_socket:/var/run/caddy
+    environment:
+      - SPARKPLUG_CONFIG_PATH=/etc/sparkplug/config.yaml
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_socket:
+

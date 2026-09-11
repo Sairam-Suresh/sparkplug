@@ -1,0 +1,64 @@
+# SparkPlug Configuration Example
+
+sparkplug:
+  # Host and port for the internal HTTP API and wake landing pages
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "INFO"
+  # Unix domain socket for real-time Caddy JSON access log streaming
+  socket_path: "/var/run/caddy/sparkplug.sock"
+  # Polling interval in seconds for background health and idle checks
+  monitor_interval_seconds: 15
+
+hosts:
+  - id: "media-server"
+    name: "Home Media Server"
+    # Target MAC address for Wake-on-LAN magic packet broadcast
+    mac_address: "AA:BB:CC:DD:EE:FF"
+    # Target host IPv4 address
+    ip_address: "192.168.1.50"
+    # Port to probe for reachability (e.g., Jellyfin/Plex on 8096, SSH on 22)
+    check_port: 8096
+    # Subnet broadcast IP for WOL packet delivery
+    broadcast_ip: "192.168.1.255"
+    # Idle minutes before issuing sleep/suspend (0 or omit to disable sleep mode)
+    sleep_timeout_minutes: 15
+    # Idle minutes before issuing full graceful poweroff (set to 0 or null to disable shutdowns entirely and use sleep only)
+    idle_timeout_minutes: 30
+    # Grace period in seconds after waking before idle checks become active
+    boot_grace_period_seconds: 90
+    # Hostnames handled by Caddy for this service (supports wildcards, e.g. *.coder.service.internal)
+    caddy_hosts:
+      - "coder.service.internal"
+      - "*.coder.service.internal"
+      - "media.home.lan"
+    # Requester filtering: specify who needs to make requests to keep the server up / reset idle timers.
+    # If omitted, all requests through Caddy reset the idle timer.
+    # Can use convenience shortcuts (keep_alive_users, keep_alive_ips) or full keep_alive_filter:
+    keep_alive_users:
+      - "alice"
+      - "*@admin.internal"
+    keep_alive_ips:
+      - "192.168.1.0/24"
+      - "10.0.0.5"
+
+    # Full structured filter example (supports headers and require_all mode):
+    # keep_alive_filter:
+    #   users: ["alice"]
+    #   ips: ["192.168.1.0/24"]
+    #   headers:
+    #     X-Authorized: "true"
+    #   require_all: false # Set true to require all criteria to match
+
+    ssh:
+      user: "sparkplug-agent"
+      key_path: "/etc/sparkplug/keys/id_ed25519"
+      port: 22
+      # Path to known_hosts file (defaults to ~/.ssh/known_hosts if omitted)
+      known_hosts_path: "/etc/sparkplug/known_hosts"
+      # Automatically verify and add new host keys (rejects changed/mismatched keys)
+      auto_add_host_keys: true
+      suspend_command: "sudo systemctl suspend"
+      shutdown_command: "sudo poweroff"
+
+

@@ -1,0 +1,34 @@
+# Example Caddyfile for Caddy with SparkPlug
+# Both containers run in the same network namespace (`network_mode: "service:caddy"`),
+# allowing Caddy to communicate with SparkPlug on localhost and share the Unix domain socket.
+
+{
+    # Global options
+    admin off
+}
+
+coder.service.internal, *.coder.service.internal, media.home.lan {
+    # 1. Stream real-time access logs in JSON to SparkPlug's Unix domain socket.
+    #    SparkPlug uses this to track active traffic and reset host idle timers,
+    #    as well as detect 502/503 errors to trigger instant Wake-on-LAN.
+    log {
+        output net unix//var/run/caddy/sparkplug.sock
+        format json
+    }
+
+    # 2. Reverse proxy traffic to the target host.
+    reverse_proxy 192.168.1.50:8096 {
+        # Dial timeout: fast failure if host is powered off
+        transport http {
+            dial_timeout 3s
+        }
+    }
+
+    # 3. Intercept 502/503/504 errors when target host is sleeping or offline.
+    #    Route to SparkPlug's waking screen on localhost:8080, preserving the original URI for auto-redirect.
+    handle_errors 502 503 504 {
+        rewrite * /wake/media-server?redirect={scheme}://{host}{uri}
+        reverse_proxy 127.0.0.1:8080
+    }
+}
+
