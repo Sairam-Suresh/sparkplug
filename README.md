@@ -1,7 +1,6 @@
 # SparkPlug
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **SparkPlug** is a lightweight Python 3 daemon and Docker service designed to work seamlessly with a **Caddy reverse proxy container**. It automatically manages bare-metal and virtual host power states:
 
