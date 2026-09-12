@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import enum
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .checker import ProbeResult
+
+logger = logging.getLogger(__name__)
 
 
 class HostState(str, enum.Enum):
@@ -29,6 +32,12 @@ class HostRuntimeState:
     sleep_timestamp: Optional[float] = None
     shutdown_timestamp: Optional[float] = None
     last_probe: Optional[ProbeResult] = None
+    last_probe_time: Optional[float] = None
+
+    def last_ping_summary(self) -> str:
+        if self.last_probe is not None:
+            return self.last_probe.summary()
+        return "no ping yet"
 
     def seconds_since_last_activity(self) -> float:
         return max(0.0, time.time() - self.last_activity_time)
@@ -71,17 +80,27 @@ class HostStateManager:
     def record_wake_requested(self, host_id: str) -> None:
         state = self._states.get(host_id)
         if state:
+            old_state = state.state
             state.state = HostState.WAKING
             state.last_wake_time = time.time()
             state.last_activity_time = time.time()
+            if old_state != HostState.WAKING:
+                logger.info(
+                    "Host '%s' state changed: %s -> waking (wake requested) [last ping: %s]",
+                    host_id,
+                    old_state.value,
+                    state.last_ping_summary(),
+                )
 
     def record_probe(self, host_id: str, probe: ProbeResult, grace_period_seconds: int) -> None:
         state = self._states.get(host_id)
         if not state:
             return
 
+        old_state = state.state
         state.last_probe = probe
         now = time.time()
+        state.last_probe_time = now
 
         if probe.online:
             # If transitioning from OFFLINE / WAKING / SLEEPING / SHUTTING_DOWN to online
@@ -109,25 +128,58 @@ class HostStateManager:
                 state.state = HostState.OFFLINE
                 state.boot_timestamp = None
 
+        if old_state != state.state:
+            logger.info(
+                "Host '%s' state changed: %s -> %s [last ping: %s]",
+                host_id,
+                old_state.value,
+                state.state.value,
+                probe.summary(),
+            )
+
     def record_sleeping(self, host_id: str) -> None:
         state = self._states.get(host_id)
         if state:
+            old_state = state.state
             state.state = HostState.SLEEPING
             state.sleep_timestamp = time.time()
             state.boot_timestamp = None
+            if old_state != HostState.SLEEPING:
+                logger.info(
+                    "Host '%s' state changed: %s -> sleeping [last ping: %s]",
+                    host_id,
+                    old_state.value,
+                    state.last_ping_summary(),
+                )
 
     def record_shutting_down(self, host_id: str) -> None:
         state = self._states.get(host_id)
         if state:
+            old_state = state.state
             state.state = HostState.SHUTTING_DOWN
             state.shutdown_timestamp = time.time()
             state.boot_timestamp = None
+            if old_state != HostState.SHUTTING_DOWN:
+                logger.info(
+                    "Host '%s' state changed: %s -> shutting_down [last ping: %s]",
+                    host_id,
+                    old_state.value,
+                    state.last_ping_summary(),
+                )
 
     def record_offline(self, host_id: str) -> None:
         state = self._states.get(host_id)
         if state:
+            old_state = state.state
             state.state = HostState.OFFLINE
             state.boot_timestamp = None
             state.sleep_timestamp = None
             state.shutdown_timestamp = None
+            if old_state != HostState.OFFLINE:
+                logger.info(
+                    "Host '%s' state changed: %s -> offline [last ping: %s]",
+                    host_id,
+                    old_state.value,
+                    state.last_ping_summary(),
+                )
 

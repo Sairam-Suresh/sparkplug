@@ -31,7 +31,14 @@ def create_app(config: AppConfig) -> FastAPI:
     idle_monitor = IdleMonitor(config, state_manager)
 
     async def on_socket_wake(host: HostConfig) -> None:
-        logger.info("Triggering WOL for %s from Caddy socket listener", host.id)
+        runtime = state_manager.get(host.id)
+        last_ping = runtime.last_ping_summary() if runtime else "unknown"
+        logger.info(
+            "Triggering WOL for host '%s' (%s) from Caddy socket listener [last ping: %s]",
+            host.id,
+            host.mac_address,
+            last_ping,
+        )
         await async_send_magic_packet(host.mac_address, host.broadcast_ip)
 
     caddy_listener = CaddySocketListener(
@@ -150,6 +157,12 @@ def create_app(config: AppConfig) -> FastAPI:
         req_headers = dict(request.headers)
 
         if not host.matches_keep_alive(user=effective_user, client_ip=client_ip, headers=req_headers):
+            logger.info(
+                "Activity received for host '%s' from user=%r, ip=%r | Decision: ignored (does not match keep_alive criteria)",
+                host_id,
+                effective_user,
+                client_ip,
+            )
             return {
                 "status": "ignored",
                 "host_id": host_id,
@@ -157,6 +170,15 @@ def create_app(config: AppConfig) -> FastAPI:
             }
 
         state_manager.record_activity(host_id)
+        runtime = state_manager.get(host_id)
+        last_ping = runtime.last_ping_summary() if runtime else "unknown"
+        logger.info(
+            "Activity recorded for host '%s' [last ping: %s] from user=%r, ip=%r | Decision: reset idle timer",
+            host_id,
+            last_ping,
+            effective_user,
+            client_ip,
+        )
         return {
             "status": "ok",
             "host_id": host_id,
@@ -169,6 +191,15 @@ def create_app(config: AppConfig) -> FastAPI:
         if not host:
             raise HTTPException(status_code=404, detail=f"Host '{host_id}' not found")
 
+        runtime = state_manager.get(host_id)
+        last_ping = runtime.last_ping_summary() if runtime else "unknown"
+        logger.info(
+            "Wake endpoint called for host '%s' [last ping: %s] | State: %s | Decision: wake system via WOL (%s)",
+            host_id,
+            last_ping,
+            runtime.state.value if runtime else "unknown",
+            host.mac_address,
+        )
         state_manager.record_wake_requested(host_id)
         await async_send_magic_packet(host.mac_address, host.broadcast_ip)
         return {
@@ -197,9 +228,23 @@ def create_app(config: AppConfig) -> FastAPI:
 
         # If already online, redirect immediately
         if runtime and runtime.state in (HostState.ONLINE, HostState.BOOTING):
+            logger.info(
+                "Wake UI visited for host '%s' [last ping: %s] | State: %s | Decision: host already active, redirecting to %s",
+                host_id,
+                probe.summary(),
+                runtime.state.value,
+                target_redirect,
+            )
             return RedirectResponse(url=target_redirect, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
         # Host is offline or sleeping: broadcast WOL
+        logger.info(
+            "Wake UI visited for host '%s' [last ping: %s] | State: %s | Decision: wake system via WOL (%s)",
+            host_id,
+            probe.summary(),
+            runtime.state.value if runtime else "unknown",
+            host.mac_address,
+        )
         state_manager.record_wake_requested(host_id)
         await async_send_magic_packet(host.mac_address, host.broadcast_ip)
 
@@ -219,8 +264,20 @@ def create_app(config: AppConfig) -> FastAPI:
         if not host:
             raise HTTPException(status_code=404, detail=f"Host '{host_id}' not found")
 
+        runtime = state_manager.get(host_id)
+        last_ping = runtime.last_ping_summary() if runtime else "unknown"
+        logger.info(
+            "Sleep endpoint called for host '%s' [last ping: %s] | State: %s | Decision: put system to sleep (suspend via SSH)",
+            host_id,
+            last_ping,
+            runtime.state.value if runtime else "unknown",
+        )
         state_manager.record_sleeping(host_id)
         res = await send_sleep_command(host.ip_address, host.ssh)
+        if not res.success:
+            logger.warning("Suspend command returned error for '%s': %s", host.id, res.error)
+        else:
+            logger.info("Suspend command succeeded for '%s'", host.id)
         return {
             "status": "sleeping" if res.success else "error",
             "host_id": host_id,
@@ -240,8 +297,20 @@ def create_app(config: AppConfig) -> FastAPI:
                 detail=f"Shutdown is disabled or shutdown_command is not configured for host '{host_id}'",
             )
 
+        runtime = state_manager.get(host_id)
+        last_ping = runtime.last_ping_summary() if runtime else "unknown"
+        logger.info(
+            "Shutdown endpoint called for host '%s' [last ping: %s] | State: %s | Decision: shut system down (poweroff via SSH)",
+            host_id,
+            last_ping,
+            runtime.state.value if runtime else "unknown",
+        )
         state_manager.record_shutting_down(host_id)
         res = await send_shutdown_command(host.ip_address, host.ssh)
+        if not res.success:
+            logger.warning("Shutdown command returned error for '%s': %s", host.id, res.error)
+        else:
+            logger.info("Shutdown command succeeded for '%s'", host.id)
         return {
             "status": "shutting_down" if res.success else "error",
             "host_id": host_id,

@@ -1,0 +1,9 @@
+# Deployment manifest for SparkPlug on target Pi
+device: local
+target_dir: /opt/serve/homelab
+bootstrap_script: update-sparkplug.sh
+only_copy_script: true
+
+environment:
+  SPARKPLUG_IMAGE: ghcr.io/sairam-suresh/sparkplug:latest
+

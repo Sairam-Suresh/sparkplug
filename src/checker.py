@@ -16,6 +16,14 @@ class ProbeResult:
     latency_ms: float = 0.0
     error: str | None = None
 
+    def summary(self) -> str:
+        """Format reachability probe result as a readable string."""
+        if self.online:
+            if self.error:
+                return f"{self.latency_ms:.1f}ms ({self.error})"
+            return f"{self.latency_ms:.1f}ms"
+        return f"unreachable ({self.error or 'connection failed'})"
+
 
 async def check_tcp_port(ip: str, port: int, timeout: float = 2.0) -> ProbeResult:
     """Check if a TCP port on a target host is reachable and accepting connections."""

@@ -206,10 +206,14 @@ class CaddySocketListener:
         if status in (502, 503, 504):
             host_state = self.state_manager.get(target_host.id)
             if host_state and host_state.state in (HostState.OFFLINE, HostState.SLEEPING):
+                last_ping = host_state.last_ping_summary()
                 logger.info(
-                    "Detected %d error in Caddy log for host '%s'; triggering proactive wake",
+                    "Detected %d error in Caddy log for host '%s' [last ping: %s] | State: %s | Decision: wake system via WOL (%s)",
                     status,
                     target_host.id,
+                    last_ping,
+                    host_state.state.value,
+                    target_host.mac_address,
                 )
                 self.state_manager.record_wake_requested(target_host.id)
                 if self.on_wake_trigger:

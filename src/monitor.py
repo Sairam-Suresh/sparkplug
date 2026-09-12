@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
 from .checker import check_host_reachability
@@ -73,51 +74,81 @@ class IdleMonitor:
         if not state:
             return
 
+        ping_str = probe.summary()
+
         # If host is in boot grace period, do not trigger any idle timeouts
         if state.is_in_boot_grace_period(host.boot_grace_period_seconds):
-            logger.debug(
-                "Host '%s' is in boot grace period (%d s remaining); skipping idle checks",
+            remaining = int(host.boot_grace_period_seconds - (state.seconds_since_boot() or 0))
+            logger.info(
+                "Host '%s' [last ping: %s] | State: %s (grace period: %ds remaining) | Decision: keep online (booting)",
                 host.id,
-                int(host.boot_grace_period_seconds - (state.seconds_since_boot() or 0)),
+                ping_str,
+                state.state.value,
+                remaining,
             )
             return
 
         idle_seconds = state.seconds_since_last_activity()
+        idle_minutes = idle_seconds / 60.0
 
         # Handle ONLINE state
         if state.state == HostState.ONLINE:
             # Check for Sleep/Suspend first (Stage 1)
             if host.is_sleep_enabled and idle_seconds >= (host.sleep_timeout_minutes * 60):
                 logger.info(
-                    "Host '%s' has been idle for %.1f minutes (sleep threshold: %d min). Triggering suspend.",
+                    "Host '%s' [last ping: %s] | State: online | Idle: %.1fm (sleep threshold: %dm) | Decision: put system to sleep (suspend)",
                     host.id,
-                    idle_seconds / 60.0,
+                    ping_str,
+                    idle_minutes,
                     host.sleep_timeout_minutes,
                 )
                 self.state_manager.record_sleeping(host.id)
                 res = await send_sleep_command(host.ip_address, host.ssh)
                 if not res.success:
                     logger.warning("Suspend command returned error for '%s': %s", host.id, res.error)
+                else:
+                    logger.info("Suspend command succeeded for '%s'", host.id)
 
             # Otherwise, check for full Shutdown (Stage 2 / single-stage) if shutdown is enabled
             elif host.is_shutdown_enabled and idle_seconds >= (host.idle_timeout_minutes * 60):
                 logger.info(
-                    "Host '%s' has been idle for %.1f minutes (shutdown threshold: %d min). Triggering poweroff.",
+                    "Host '%s' [last ping: %s] | State: online | Idle: %.1fm (shutdown threshold: %dm) | Decision: shut system down (poweroff)",
                     host.id,
-                    idle_seconds / 60.0,
+                    ping_str,
+                    idle_minutes,
                     host.idle_timeout_minutes,
                 )
                 self.state_manager.record_shutting_down(host.id)
                 res = await send_shutdown_command(host.ip_address, host.ssh)
                 if not res.success:
                     logger.warning("Shutdown command returned error for '%s': %s", host.id, res.error)
+                else:
+                    logger.info("Shutdown command succeeded for '%s'", host.id)
+
+            else:
+                if host.is_sleep_enabled:
+                    next_timeout = f"sleep in {max(0.0, host.sleep_timeout_minutes - idle_minutes):.1f}m"
+                elif host.is_shutdown_enabled:
+                    next_timeout = f"shutdown in {max(0.0, host.idle_timeout_minutes - idle_minutes):.1f}m"
+                else:
+                    next_timeout = "no idle timeout configured"
+
+                logger.info(
+                    "Host '%s' [last ping: %s] | State: online | Idle: %.1fm (%s) | Decision: keep online",
+                    host.id,
+                    ping_str,
+                    idle_minutes,
+                    next_timeout,
+                )
 
         # Handle SLEEPING state transition to deep shutdown if idle continues (and shutdown is enabled)
         elif state.state == HostState.SLEEPING:
             if host.is_shutdown_enabled and idle_seconds >= (host.idle_timeout_minutes * 60):
                 logger.info(
-                    "Host '%s' in sleep mode has exceeded total idle threshold (%d min). Transitioning to full shutdown.",
+                    "Host '%s' [last ping: %s] | State: sleeping | Idle: %.1fm (shutdown threshold: %dm) | Decision: wake and shut system down",
                     host.id,
+                    ping_str,
+                    idle_minutes,
                     host.idle_timeout_minutes,
                 )
                 # To shut down a suspended host, send WOL packet to resume, then issue shutdown
@@ -126,7 +157,49 @@ class IdleMonitor:
                     await async_send_magic_packet(host.mac_address, host.broadcast_ip)
                     # Brief pause for SSH to be reachable after wake
                     await asyncio.sleep(5)
-                    await send_shutdown_command(host.ip_address, host.ssh)
+                    res = await send_shutdown_command(host.ip_address, host.ssh)
+                    if not res.success:
+                        logger.warning("Shutdown command returned error for '%s': %s", host.id, res.error)
+                    else:
+                        logger.info("Shutdown command succeeded for '%s'", host.id)
                 except Exception as err:
                     logger.error("Error shutting down sleeping host '%s': %s", host.id, err)
+            else:
+                if host.is_shutdown_enabled:
+                    next_timeout = f"shutdown in {max(0.0, host.idle_timeout_minutes - idle_minutes):.1f}m"
+                else:
+                    next_timeout = "shutdown disabled"
+
+                logger.info(
+                    "Host '%s' [last ping: %s] | State: sleeping | Idle: %.1fm (%s) | Decision: keep sleeping",
+                    host.id,
+                    ping_str,
+                    idle_minutes,
+                    next_timeout,
+                )
+
+        elif state.state == HostState.OFFLINE:
+            logger.info(
+                "Host '%s' [last ping: %s] | State: offline | Decision: maintain offline",
+                host.id,
+                ping_str,
+            )
+
+        elif state.state == HostState.WAKING:
+            elapsed = (time.time() - state.last_wake_time) if state.last_wake_time else 0.0
+            logger.info(
+                "Host '%s' [last ping: %s] | State: waking (elapsed: %.1fs) | Decision: waiting for host to wake",
+                host.id,
+                ping_str,
+                elapsed,
+            )
+
+        elif state.state == HostState.SHUTTING_DOWN:
+            elapsed = (time.time() - state.shutdown_timestamp) if state.shutdown_timestamp else 0.0
+            logger.info(
+                "Host '%s' [last ping: %s] | State: shutting_down (elapsed: %.1fs) | Decision: waiting for shutdown to complete",
+                host.id,
+                ping_str,
+                elapsed,
+            )
 

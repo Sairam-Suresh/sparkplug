@@ -1,0 +1,86 @@
+name: Deploy SparkPlug
+
+on:
+  workflow_run:
+    workflows: ["Build and Publish Docker Image to GHCR"]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: homelab
+
+      - name: Trust Step-CA Root Certificate
+        run: |
+          sudo curl -fsS http://stepca.service.internal/roots.pem -o /usr/local/share/ca-certificates/stepca.crt
+          sudo update-ca-certificates
+
+      - name: Trigger Homelab Updater Webhook
+        env:
+          UPDATER_URL: ${{ secrets.HOMELAB_UPDATER_URL }}
+          UPDATER_TOKEN: ""
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TARGET_REF: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+        run: |
+          BASE_URL="${UPDATER_URL%/api/v1/deploy}"
+          HEALTH_URL="${BASE_URL%/}/healthz"
+
+          echo "Waiting for updater service at $HEALTH_URL to be online and healthy..."
+          READY=false
+          for i in $(seq 1 30); do
+            if curl -fsS "$HEALTH_URL" 2>/dev/null | grep -q '"ok"'; then
+              echo "Updater service is online and ready!"
+              READY=true
+              break
+            fi
+            echo "Waiting for updater to become ready... (attempt $i/30)"
+            sleep 2
+          done
+
+          if [ "$READY" != "true" ]; then
+            echo "Error: Timed out waiting for updater service at $HEALTH_URL"
+            exit 1
+          fi
+
+          AUTH_HEADER=()
+          if [ -n "${UPDATER_TOKEN:-}" ]; then
+            AUTH_HEADER=(-H "X-Homelab-Token: ${UPDATER_TOKEN}")
+          fi
+
+          echo "Deploying sparkplug at commit $TARGET_SHA..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${UPDATER_URL}" \
+            -H "Content-Type: application/json" \
+            "${AUTH_HEADER[@]}" \
+            -d "{
+              \"repo_url\": \"${{ github.server_url }}/${{ github.repository }}.git\",
+              \"commit_sha\": \"$TARGET_SHA\",
+              \"repo_relative_path\": \".\",
+              \"git_branch\": \"$TARGET_REF\"
+            }")
+
+          HTTP_BODY=$(echo "$RESPONSE" | sed '$d')
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+
+          echo "Response Body:"
+          echo "$HTTP_BODY" | jq . 2>/dev/null || echo "$HTTP_BODY"
+          echo "HTTP Status Code: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Deployment failed with status code $HTTP_CODE!"
+            exit 1
+          fi
+          echo "Deployment succeeded!"
+
