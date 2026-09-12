@@ -92,6 +92,10 @@ class CaddySocketListener:
 
         # Ensure directory exists
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(str(self.socket_path.parent), 0o777)
+        except OSError:
+            pass
 
         # Remove stale socket file if it exists
         if self.socket_path.exists():

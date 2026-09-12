@@ -40,16 +40,13 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV SPARKPLUG_CONFIG_PATH=/etc/sparkplug/config.yaml
 
-# Create sparkplug user and socket directory
+# Create directories (and sparkplug user for optional non-root execution)
 RUN groupadd -r sparkplug && useradd -r -g sparkplug -d /app sparkplug \
-    && mkdir -p /etc/sparkplug/keys /var/run/caddy \
-    && chown -R sparkplug:sparkplug /app /var/run/caddy /etc/sparkplug
+    && mkdir -p /etc/sparkplug/keys /var/run/caddy /app \
+    && chmod 777 /var/run/caddy
 
 # Copy application source code
 COPY src/ /app/src/
-
-# Switch to non-root user
-USER sparkplug
 
 EXPOSE 8080
 
